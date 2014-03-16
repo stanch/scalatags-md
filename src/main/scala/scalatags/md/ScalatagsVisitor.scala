@@ -20,13 +20,13 @@ class ScalatagsVisitor(val universe: Universe)(_parts: Seq[Universe#Tree]) exten
   // This hack is due to inability to use universe.Type in class constructor
   val parts = _parts.asInstanceOf[Seq[Tree]]
 
-  /** A continuation that produces a Tree from a scalatags.HtmlTag, given its children */
-  case class TagTree(children: List[Tree], f: List[Tree] ⇒ Tree) {
-    def make = f(children)
+  /** A continuation that produces a Tree, given its children */
+  case class StackEntry(children: List[Tree], f: List[Tree] ⇒ Tree) {
+    def makeTree = f(children)
   }
 
-  object TagTree {
-    def apply(tag: HtmlTag) = new TagTree(Nil, { ch ⇒
+  object StackEntry {
+    def apply(tag: HtmlTag) = new StackEntry(Nil, { ch ⇒
       q"scalatags.HtmlTag(${tag.tag}, scala.collection.immutable.List(..$ch), scala.collection.SortedMap.empty)"
     })
   }
@@ -42,52 +42,63 @@ class ScalatagsVisitor(val universe: Universe)(_parts: Seq[Universe#Tree]) exten
   }
 
   /** Stack of tags being visited */
-  var stack: List[TagTree] = List(TagTree(div()))
+  var stack: List[StackEntry] = List(StackEntry(div()))
 
   /** The result of "visiting" */
   // This is hacky to please the path-dependent types
   def result[U <: Universe] = stack.head.children.head.asInstanceOf[U#Tree]
 
-  /** Update the top of the stack by adding a new Tree to its head */
-  def update(add: Tree) = {
-    val head :: tail = stack
-    stack = head.copy(children = add :: head.children) :: tail
+  /** Push an entry into the stack */
+  def push(entry: StackEntry) = {
+    stack ::= entry
   }
 
-  // These three methods are equivalent to print, printTag & co
+  /** Pop from the stack */
+  def pop() = {
+    val head :: tail = stack
+    stack = tail
+    head
+  }
+
+  /** Append a Tree to the current entry */
+  def append(tree: Tree) = {
+    val head :: tail = stack
+    stack = head.copy(children = tree :: head.children) :: tail
+  }
+
+  // These methods are equivalent to print, printTag & co
   // at [https://github.com/sirthias/pegdown/blob/master/src/main/java/org/pegdown/ToHtmlSerializer.java]
 
   /** Add text */
   def addText(content: String) = {
-    update(makeTree(StringNode(content)))
+    append(makeTree(StringNode(content)))
   }
 
   /** Add raw */
   def addRaw(content: String) = {
-    update(makeTree(RawNode(content)))
+    append(makeTree(RawNode(content)))
   }
 
   /** Add a tree */
   def addTree(tree: Tree) = {
-    update(tree)
+    append(tree)
   }
 
   /** Add text tag */
   def addTag(node: TextNode, tag: String) = {
-    update(makeTree(HtmlTag(tag, StringNode(node.getText) :: Nil, SortedMap.empty)))
+    append(makeTree(HtmlTag(tag, StringNode(node.getText) :: Nil, SortedMap.empty)))
   }
 
   /** Add tag node */
   def addTag(node: SuperNode, tag: String) = {
-    // push
-    stack ::= TagTree(HtmlTag(tag, Nil, SortedMap.empty))
+    // push to the stack
+    push(StackEntry(HtmlTag(tag, Nil, SortedMap.empty)))
     // recurse
     visitChildren(node)
-    // pop
-    val head :: tail = stack
-    stack = tail
-    // insert into the top
-    update(head.make)
+    // pop from the stack
+    val tree = pop().makeTree
+    // add to stack top’s children
+    append(tree)
   }
 
   // The rest is an approximation of what is found
