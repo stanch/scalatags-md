@@ -4,7 +4,7 @@ import org.pegdown.ast._
 import scalatags.{ HtmlTag, StringNode, RawNode }
 import scalatags.Tags._
 import scala.collection.JavaConversions._
-import scala.collection.SortedMap
+import scala.collection.{mutable, SortedMap}
 import scala.reflect.api.Universe
 
 object ScalatagsVisitor {
@@ -42,28 +42,16 @@ class ScalatagsVisitor(val universe: Universe)(_parts: Seq[Universe#Tree]) exten
   }
 
   /** Stack of tags being visited */
-  var stack: List[StackEntry] = List(StackEntry(div()))
+  val stack = mutable.Stack(StackEntry(div()))
 
   /** The result of "visiting" */
   // This is hacky to please the path-dependent types
   def result[U <: Universe] = stack.head.children.head.asInstanceOf[U#Tree]
 
-  /** Push an entry into the stack */
-  def push(entry: StackEntry) = {
-    stack ::= entry
-  }
-
-  /** Pop from the stack */
-  def pop() = {
-    val head :: tail = stack
-    stack = tail
-    head
-  }
-
-  /** Append a Tree to the current entry */
+  /** Append a Tree to the top of the stack */
   def append(tree: Tree) = {
-    val head :: tail = stack
-    stack = head.copy(children = tree :: head.children) :: tail
+    val top = stack.pop()
+    stack.push(top.copy(children = tree :: top.children))
   }
 
   // These methods are equivalent to print, printTag & co
@@ -91,13 +79,9 @@ class ScalatagsVisitor(val universe: Universe)(_parts: Seq[Universe#Tree]) exten
 
   /** Add tag node */
   def addTag(node: SuperNode, tag: String) = {
-    // push to the stack
-    push(StackEntry(HtmlTag(tag, Nil, SortedMap.empty)))
-    // recurse
+    stack.push(StackEntry(HtmlTag(tag, Nil, SortedMap.empty)))
     visitChildren(node)
-    // pop from the stack
-    val tree = pop().makeTree
-    // add to stack top’s children
+    val tree = stack.pop().makeTree
     append(tree)
   }
 
