@@ -17,6 +17,6 @@ object Macros {
     visitor.visit(parsed)
     val result = visitor.result[c.universe.type]
     c.info(c.enclosingPosition, result.toString(), force = false)
-    c.Expr[HtmlTag](result)
+    c.Expr[GroupNode](result)
   }
 }

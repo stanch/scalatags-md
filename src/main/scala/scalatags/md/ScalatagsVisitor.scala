@@ -2,10 +2,10 @@ package scalatags.md
 
 import org.pegdown.ast._
 import scalatags.{ HtmlTag, StringNode, RawNode }
-import scalatags.Tags._
 import scala.collection.JavaConversions._
 import scala.collection.{mutable, SortedMap}
 import scala.reflect.api.Universe
+import org.pegdown.LinkRenderer
 
 object ScalatagsVisitor {
   object Fragment {
@@ -20,6 +20,16 @@ class ScalatagsVisitor(val universe: Universe)(_parts: Seq[Universe#Tree]) exten
   // This hack is due to inability to use universe.Type in class constructor
   val parts = _parts.asInstanceOf[Seq[Tree]]
 
+  // meanwhile real liftables do not work (?)
+  // https://groups.google.com/forum/#!topic/scala-language/BM1EPrZY3Hk
+  object Liftable {
+    def apply(list: List[Tree]) =
+      q"scala.collection.immutable.List(..$list)"
+
+    def apply(map: SortedMap[String, String]) =
+      q"scala.collection.SortedMap(..${map.map { case (k, v) ⇒ q"($k, $v)"}.toList: List[Tree]})"
+  }
+
   /** A continuation that produces a Tree, given its children */
   case class StackEntry(children: List[Tree], f: List[Tree] ⇒ Tree) {
     def makeTree = f(children)
@@ -27,14 +37,18 @@ class ScalatagsVisitor(val universe: Universe)(_parts: Seq[Universe#Tree]) exten
 
   object StackEntry {
     def apply(tag: HtmlTag) = new StackEntry(Nil, { ch ⇒
-      q"scalatags.HtmlTag(${tag.tag}, scala.collection.immutable.List(..$ch), scala.collection.SortedMap.empty)"
+      q"scalatags.HtmlTag(${tag.tag}, ${Liftable(ch)}, ${Liftable(tag.attrs)})"
+    })
+
+    def apply(node: GroupNode) = new StackEntry(Nil, { ch ⇒
+      q"scalatags.md.GroupNode(${Liftable(ch)})"
     })
   }
 
   /** Make a Tree from an arbitrary scalatags.Node */
   def makeTree(node: scalatags.Node): Tree = node match {
-    case HtmlTag(tag, children, _, _) ⇒
-      q"scalatags.HtmlTag($tag, scala.collection.immutable.List(..${children.map(makeTree): List[Tree]}), scala.collection.SortedMap.empty, false)"
+    case HtmlTag(tag, children, attrs, _) ⇒
+      q"scalatags.HtmlTag($tag, ${Liftable(children.map(makeTree))}, ${Liftable(attrs)})"
     case RawNode(v) ⇒
       q"scalatags.RawNode($v)"
     case StringNode(v) ⇒
@@ -42,11 +56,11 @@ class ScalatagsVisitor(val universe: Universe)(_parts: Seq[Universe#Tree]) exten
   }
 
   /** Stack of tags being visited */
-  val stack = mutable.Stack(StackEntry(div()))
+  val stack = mutable.Stack(StackEntry(GroupNode(Nil)))
 
   /** The result of "visiting" */
   // This is hacky to please the path-dependent types
-  def result[U <: Universe] = stack.head.children.head.asInstanceOf[U#Tree]
+  def result[U <: Universe] = stack.head.makeTree.asInstanceOf[U#Tree]
 
   /** Append a Tree to the top of the stack */
   def append(tree: Tree) = {
@@ -85,6 +99,23 @@ class ScalatagsVisitor(val universe: Universe)(_parts: Seq[Universe#Tree]) exten
     append(tree)
   }
 
+  def addImg(rendering: LinkRenderer.Rendering) = {
+    append(makeTree(HtmlTag("img", Nil, SortedMap(
+      ("src", rendering.href) +:
+      ("alt", rendering.text) +:
+      rendering.attributes.map(a ⇒ (a.name, a.value)).toSeq: _*
+    ))))
+  }
+
+  protected def addLink(rendering: LinkRenderer.Rendering) = {
+    append(makeTree(HtmlTag("a", StringNode(rendering.text) :: Nil, SortedMap(
+      ("href", rendering.href) +:
+      rendering.attributes.map(a ⇒ (a.name, a.value)).toSeq: _*
+    ))))
+  }
+
+  val linkRenderer = new LinkRenderer
+
   // The rest is an approximation of what is found
   // at [https://github.com/sirthias/pegdown/blob/master/src/main/java/org/pegdown/ToHtmlSerializer.java]
 
@@ -96,7 +127,7 @@ class ScalatagsVisitor(val universe: Universe)(_parts: Seq[Universe#Tree]) exten
 
   def visit(node: TextNode) = addText(node.getText)
 
-  def visit(node: WikiLinkNode): Unit = ???
+  def visit(node: WikiLinkNode) = addLink(linkRenderer.render(node))
 
   def visit(node: VerbatimNode): Unit = ???
 
@@ -125,11 +156,20 @@ class ScalatagsVisitor(val universe: Universe)(_parts: Seq[Universe#Tree]) exten
     visitChildren(node)
   }
 
-  def visit(node: StrikeNode): Unit = ???
+  def visit(node: StrikeNode) = addTag(node, "del")
 
   def visit(node: SpecialTextNode) = addRaw(node.getText)
 
-  def visit(node: SimpleNode): Unit = ???
+  def visit(node: SimpleNode) = node.getType match {
+    case SimpleNode.Type.Apostrophe ⇒ addRaw("&rsquo;")
+    case SimpleNode.Type.Ellipsis ⇒ addRaw("&hellip;")
+    case SimpleNode.Type.Emdash ⇒ addRaw("&mdash;")
+    case SimpleNode.Type.Endash ⇒ addRaw("&ndash;")
+    case SimpleNode.Type.HRule ⇒ addRaw("<hr/>")
+    case SimpleNode.Type.Linebreak ⇒ addRaw("<br/>")
+    case SimpleNode.Type.Nbsp ⇒ addRaw("&nbsp;")
+    case _ ⇒ ???
+  }
 
   def visit(node: RootNode) = visitChildren(node)
 
@@ -139,19 +179,32 @@ class ScalatagsVisitor(val universe: Universe)(_parts: Seq[Universe#Tree]) exten
 
   def visit(node: ReferenceNode): Unit = ???
 
-  def visit(node: QuotedNode): Unit = ???
+  def visit(node: QuotedNode) = node.getType match {
+    case QuotedNode.Type.DoubleAngle ⇒
+      addRaw("&laquo;")
+      visitChildren(node)
+      addRaw("&raquo;")
+    case QuotedNode.Type.Double ⇒
+      addRaw("&ldquo;")
+      visitChildren(node)
+      addRaw("&rdquo;")
+    case QuotedNode.Type.Single ⇒
+      addRaw("&lsquo;")
+      visitChildren(node)
+      addRaw("&rsquo;")
+  }
 
   def visit(node: ParaNode) = addTag(node, "p")
 
-  def visit(node: OrderedListNode): Unit = ???
+  def visit(node: OrderedListNode) = addTag(node, "ol")
 
-  def visit(node: MailLinkNode): Unit = ???
+  def visit(node: MailLinkNode) = addLink(linkRenderer.render(node))
 
-  def visit(node: ListItemNode): Unit = ???
+  def visit(node: ListItemNode) = addTag(node, "li")
 
-  def visit(node: InlineHtmlNode): Unit = ???
+  def visit(node: InlineHtmlNode) = addRaw(node.getText)
 
-  def visit(node: HtmlBlockNode): Unit = ???
+  def visit(node: HtmlBlockNode) = addRaw(node.getText)
 
   def visit(node: HeaderNode): Unit = ???
 
