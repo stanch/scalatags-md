@@ -19,6 +19,6 @@ libraryDependencies ++= Seq(
 
 libraryDependencies ++= Seq(
   "com.scalatags" %% "scalatags" % "0.2.4",
-  "org.pegdown" % "pegdown" % "1.4.2",
+  "org.planet42" %% "laika-core" % "0.5.0",
   "org.scalatest" %% "scalatest" % "2.1.0" % "test"
 )
