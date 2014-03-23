@@ -8,13 +8,13 @@ scalacOptions ++= Seq("-feature", "-deprecation")
 
 resolvers ++= Seq(
   Resolver.sonatypeRepo("releases"),
-  "Typesafe" at "http://repo.typesafe.com/typesafe/releases/"
+  Resolver.sonatypeRepo("snapshots")
 )
 
 libraryDependencies ++= Seq(
   "org.scala-lang" % "scala-reflect" % scalaVersion.value,
-  compilerPlugin("org.scalamacros" % "paradise" % "2.0.0-M5" cross CrossVersion.full),
-  "org.scalamacros" % "quasiquotes" % "2.0.0-M5" cross CrossVersion.full
+  compilerPlugin("org.scalamacros" % "paradise" % "2.0.0-SNAPSHOT" cross CrossVersion.full),
+  "org.scalamacros" % "quasiquotes" % "2.0.0-SNAPSHOT" cross CrossVersion.full
 )
 
 libraryDependencies ++= Seq(
