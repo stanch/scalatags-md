@@ -9,6 +9,11 @@ class MarkdownSpec extends FlatSpec {
   Hey, I'm *some* markdown with $x and stuff
 
   Another paragraph
+
+  ``
+  val x = 3
+  val y = 4
+  ``
   """
   val z = div(x, y)
   println(z)

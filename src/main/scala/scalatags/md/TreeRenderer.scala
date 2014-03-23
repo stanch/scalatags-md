@@ -5,13 +5,15 @@ import laika.tree.Elements
 import laika.tree.Elements._
 import laika.tree.Templates._
 import scala.collection.SortedMap
+import scala.quasiquotes.StandardLiftables
 
 object FragmentLink {
   def apply(i: Int) = s"[dummy](%%fragment%%$i)"
   def unapply(s: String): Option[Int] = if (s.startsWith("%%fragment%%")) Some(s.substring("%%fragment%%".length).toInt) else None
 }
 
-class TreeRenderer(val universe: Universe)(_parts: Seq[Universe#Tree]) {
+class TreeRenderer(val universe: Universe)(_parts: Seq[Universe#Tree]) extends StandardLiftables {
+  val u: universe.type = universe
   import universe.{ Block ⇒ _, _ }
 
   // This hack is due to inability to use universe.Type in class constructor
@@ -19,12 +21,10 @@ class TreeRenderer(val universe: Universe)(_parts: Seq[Universe#Tree]) {
 
   // meanwhile real liftables do not work (?)
   // https://groups.google.com/forum/#!topic/scala-language/BM1EPrZY3Hk
-  object Liftable {
-    def apply(list: List[Tree]) =
-      q"scala.collection.immutable.List(..$list)"
 
-    def apply(map: SortedMap[String, String]) =
-      q"scala.collection.SortedMap(..${map.map { case (k, v) ⇒ q"($k, $v)" }.toList: List[Tree]})"
+  implicit val `Tree is liftable` = Liftable[Tree](identity)
+  implicit def `SortedMap is liftable`[A: Liftable, B: Liftable] = Liftable[SortedMap[A, B]] { map ⇒
+    q"scala.collection.SortedMap(..${map.map { case (k, v) ⇒ q"($k, $v)" }.toList})"
   }
 
   object Symbols {
@@ -62,7 +62,9 @@ class TreeRenderer(val universe: Universe)(_parts: Seq[Universe#Tree]) {
       List(SpanSequence(List(img)), Paragraph(caption, Styles("caption")), BlockSequence(legend, Styles("legend")))
 
     con match {
-      case RootElement(content) ⇒ q"scalatags.md.GroupNode(${Liftable(content.map(render).toList)})" //if (content.nonEmpty) out << content.head <<| content.tail
+      case RootElement(content) ⇒
+        q"scalatags.md.GroupNode(${content.map(render).toList.reverse})"
+
       case EmbeddedRoot(content, indent, _) ⇒ ??? //out.indented(indent) { if (content.nonEmpty) out << content.head <<| content.tail }
       case Section(header, content, _) ⇒ ??? //out << header <<| content
       case TitledBlock(title, content, opt) ⇒ ??? //out <<@ ("div", opt) <<|> (Paragraph(title, Styles("title")) +: content) <<| "</div>"
@@ -101,17 +103,24 @@ class TreeRenderer(val universe: Universe)(_parts: Seq[Universe#Tree]) {
     }
 
     con match {
-      case Paragraph(content, opt) ⇒ q"scalatags.Tags.p(${Liftable(content.map(render).toList)})" //out <<@ ("p", opt) << content << "</p>"
-      case Emphasized(content, opt) ⇒ q"scalatags.Tags.em(${Liftable(content.map(render).toList)})" //out <<@ ("em", opt) << content << "</em>"
-      case Strong(content, opt) ⇒ ??? //out <<@ ("strong", opt) << content << "</strong>"
+      case Paragraph(content, opt) ⇒
+        q"scalatags.Tags.p(${content.map(render).toList})"
+      case Emphasized(content, opt) ⇒
+        q"scalatags.Tags.em(${content.map(render).toList})"
+      case Strong(content, opt) ⇒
+        q"scalatags.Tags.strong(${content.map(render).toList})"
+
       case ParsedLiteralBlock(content, opt) ⇒ ??? //out <<@ ("pre", opt) << "<code>" <<< content << "</code></pre>"
       case CodeBlock(lang, ontent, opt) ⇒ ??? //out <<@ ("pre", opt + codeStyles(lang)) << "<code>" <<< content << "</code></pre>"
       case Code(lang, content, opt) ⇒ ??? //out <<@ ("code", opt + codeStyles(lang)) << content << "</code>"
       case Line(content, opt) ⇒ ??? //out <<@ ("div", opt + Styles("line")) << content << "</div>"
+
       case Header(level, content, opt) ⇒
-        ??? //out <|; out <<@ ("h" + level.toString, opt) << content << "</h" << level.toString << ">"
+        val tag = newTermName(s"p$level")
+        q"""scalatags.Tags.$tag(${content.map(render).toList})"""
 
       case ExternalLink(content, FragmentLink(i), title, opt) ⇒ parts(i)
+
       case ExternalLink(content, url, title, opt) ⇒ ??? //out <<@ ("a", opt, "href" -> url, "title" -> title.map(escapeTitle)) << content << "</a>"
       case InternalLink(content, ref, title, opt) ⇒ ??? //out <<@ ("a", opt, "href" -> ("#" + ref), "title" -> title.map(escapeTitle)) << content << "</a>"
       case CrossLink(content, ref, path, title, opt) ⇒ ??? //out <<@ ("a", opt, "href" -> (crossLinkRef(path, ref)), "title" -> title.map(escapeTitle)) << content << "</a>"
@@ -143,17 +152,16 @@ class TreeRenderer(val universe: Universe)(_parts: Seq[Universe#Tree]) {
       case NoOpt ⇒ q"scalatags.StringNode($content)" //out <<& content
       case _ ⇒ ??? //out <<@ ("span", opt) <<& content << "</span>"
     }
-    case TemplateString(content, opt) ⇒ opt match {
-      case NoOpt ⇒ ??? //out << content
-      case _ ⇒ ??? //out <<@ ("span", opt) << content << "</span>"
-    }
+    case TemplateString(content, opt) ⇒ ???
     case RawContent(formats, content, opt) ⇒ ??? /*if (formats.contains("html")) {
       opt match {
         case NoOpt ⇒ out << content
         case _ ⇒ out <<@ ("span", opt) << content << "</span>"
       }
     }*/
-    case Elements.Literal(content, opt) ⇒ ??? //out <<@ ("code", opt) <<<& content << "</code>"
+    case Elements.Literal(content, opt) ⇒
+      q"scalatags.Tags.code(scalatags.RawNode($content))"
+
     case LiteralBlock(content, opt) ⇒ ??? //out <<@ ("pre", opt) << "<code>" <<<& content << "</code></pre>"
     case Comment(content, opt) ⇒ ??? //out << "<!-- " << content << " -->"
 
