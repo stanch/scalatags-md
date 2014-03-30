@@ -5,15 +5,13 @@ import laika.tree.Elements
 import laika.tree.Elements._
 import laika.tree.Templates._
 import scala.collection.SortedMap
-import scala.quasiquotes.StandardLiftables
 
 object FragmentLink {
   def apply(i: Int) = s"[dummy](%%fragment%%$i)"
   def unapply(s: String): Option[Int] = if (s.startsWith("%%fragment%%")) Some(s.substring("%%fragment%%".length).toInt) else None
 }
 
-class TreeRenderer(val universe: Universe)(_parts: Seq[Universe#Tree]) extends StandardLiftables {
-  val u: universe.type = universe
+class TreeRenderer(val universe: Universe)(_parts: Seq[Universe#Tree]) {
   import universe.{ Block ⇒ _, _ }
 
   // need to use _root_ to be extra sure that names binds to the right definition
@@ -25,9 +23,8 @@ class TreeRenderer(val universe: Universe)(_parts: Seq[Universe#Tree]) extends S
   // meanwhile real liftables do not work (?)
   // https://groups.google.com/forum/#!topic/scala-language/BM1EPrZY3Hk
 
-  implicit val `Tree is liftable` = Liftable[Tree](identity)
-  implicit def `SortedMap is liftable`[A: Liftable, B: Liftable] = Liftable[SortedMap[A, B]] { map ⇒
-    q"_root_.scala.collection.SortedMap(..${map.map { case (k, v) ⇒ q"($k, $v)" }.toList})"
+  implicit def `SortedMap is liftable`[A: Liftable, B: Liftable] = new Liftable[SortedMap[A, B]] {
+    def apply(map: SortedMap[A, B]) = q"_root_.scala.collection.SortedMap(..${map.map { case (k, v) ⇒ q"($k, $v)" }.toList})"
   }
 
   object Symbols {
