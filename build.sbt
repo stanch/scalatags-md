@@ -13,8 +13,8 @@ resolvers ++= Seq(
 
 libraryDependencies ++= Seq(
   "org.scala-lang" % "scala-reflect" % scalaVersion.value,
-  compilerPlugin("org.scalamacros" % "paradise" % "2.0.0-SNAPSHOT" cross CrossVersion.full),
-  "org.scalamacros" % "quasiquotes" % "2.0.0-SNAPSHOT" cross CrossVersion.full
+  compilerPlugin("org.scalamacros" % "paradise" % "2.0.0-M6" cross CrossVersion.full),
+  "org.scalamacros" % "quasiquotes" % "2.0.0-M6" cross CrossVersion.full
 )
 
 libraryDependencies ++= Seq(
